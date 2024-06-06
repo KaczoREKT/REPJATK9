@@ -1,12 +1,7 @@
-namespace DefaultNamespace;
-
-public class TripsController
-{
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Linq;
 using System.Threading.Tasks;
-using YourNamespace.Models;
 
 [Route("api/[controller]")]
 [ApiController]
@@ -22,8 +17,13 @@ public class TripsController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetTrips([FromQuery] int page = 1, [FromQuery] int pageSize = 10)
     {
-        var trips = await _context.Trips
-            .OrderByDescending(t => t.DateFrom)
+        var tripsQuery = _context.Trips
+            .Include(t => t.CountryTrips).ThenInclude(ct => ct.Country)
+            .Include(t => t.ClientTrips).ThenInclude(ct => ct.Client)
+            .OrderByDescending(t => t.DateFrom);
+
+        var totalTrips = await tripsQuery.CountAsync();
+        var trips = await tripsQuery
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .Select(t => new
@@ -33,12 +33,10 @@ public class TripsController : ControllerBase
                 t.DateFrom,
                 t.DateTo,
                 t.MaxPeople,
-                Countries = t.TripCountries.Select(tc => new { tc.Country.Name }).ToList(),
+                Countries = t.CountryTrips.Select(ct => new { ct.Country.Name }).ToList(),
                 Clients = t.ClientTrips.Select(ct => new { ct.Client.FirstName, ct.Client.LastName }).ToList()
             })
             .ToListAsync();
-
-        var totalTrips = await _context.Trips.CountAsync();
 
         return Ok(new
         {
@@ -48,11 +46,11 @@ public class TripsController : ControllerBase
             trips
         });
     }
+
     [HttpPost("{idTrip}/clients")]
     public async Task<IActionResult> AssignClientToTrip(int idTrip, [FromBody] ClientTripDto clientTripDto)
     {
-        var trip = await _context.Trips
-            .FirstOrDefaultAsync(t => t.IdTrip == idTrip);
+        var trip = await _context.Trips.FindAsync(idTrip);
 
         if (trip == null)
         {
@@ -64,8 +62,7 @@ public class TripsController : ControllerBase
             return BadRequest(new { message = "Cannot assign to a trip that has already started" });
         }
 
-        var client = await _context.Clients
-            .FirstOrDefaultAsync(c => c.Pesel == clientTripDto.Pesel);
+        var client = await _context.Clients.FirstOrDefaultAsync(c => c.Pesel == clientTripDto.Pesel);
 
         if (client != null)
         {
@@ -106,4 +103,13 @@ public class TripsController : ControllerBase
         return Ok();
     }
 }
+
+public class ClientTripDto
+{
+    public string FirstName { get; set; }
+    public string LastName { get; set; }
+    public string Email { get; set; }
+    public string Telephone { get; set; }
+    public string Pesel { get; set; }
+    public DateTime? PaymentDate { get; set; }
 }
